@@ -1,0 +1,40 @@
+#pragma once
+#include <unordered_map>
+#include <vector>
+#include <cstdint>
+
+#include "BStarTree.hpp"
+#include "types.hpp"
+
+/* 代表一個 symmetry-island：用 BStarTree 打包「代表半邊」，再鏡射 */
+class AsfIsland {
+public:
+    AsfIsland(SymmGroup * g): group_(g) {}
+
+    void Initialize(std::vector<Block> &blocks);
+    void Pack(std::vector<Block>& blocks);
+    void BuildInitialSolution();
+    void UpdateNodes(const std::vector<Block>& blocks);
+
+    int GetNumberNodes() const;
+    int GetNumberPairRepresentNodes() const;
+    NodePointer GetNode(int idx);
+    void SwapNode(const int src_idx, const int dst_idx);
+
+    inline int GetWidth() const { return bbox_w_; }
+    inline int GetHeight() const { return bbox_h_; }
+    const std::vector<int>& GetBlockIds() const { return block_ids_; }
+
+private:
+    SymmGroup * group_;                       // 指回原對稱群
+    BStarTree<IdType> bs_tree_;               // 代表半邊的 BStarTree
+    
+    std::vector<int> block_ids_;              // 全部的 block id  
+    std::vector<std::pair<int,int>> contour_; // 代表半邊的 contour segments
+
+    NodePointerList pair_represent_nodes_;    // 代表半邊的對稱對點
+    NodePointerList self_represent_nodes_;    // 代表半邊的字對稱點
+
+    int bbox_w_{0}, bbox_h_{0};               // 半邊外框
+    int axis_pos_{0};                         // 垂直：x；水平：y
+};
