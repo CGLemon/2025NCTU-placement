@@ -21,11 +21,12 @@ private:
     void RotateNode();
     void SwapNode();
     void SwapOrRotateGroupNode();
-    void MoveNode();
-    void ResetStats();
+    void MoveLeafNode();
+    void UpdateStats();
 
     bool ShouldReduceTemperature() const;
-    bool ShouldStop() const;
+    bool ShouldStopRound() const;
+    bool ShouldStopRunning() const;
 
     std::vector<Block> blocks_;       // 所有 HardBlock
     std::vector<SymmGroup> groups_;   // 對稱群
@@ -42,5 +43,7 @@ private:
     int gen_cnt_;
     int reject_cnt_;
     int uphill_cnt_;
+    int continuous_reject_cnt_;
+    bool stop_;
 };
 

@@ -7,6 +7,7 @@
 #include <random>
 #include <thread>
 #include <vector>
+#include <functional>
 #include <unordered_set>
 
 #include "types.hpp"
@@ -75,11 +76,34 @@ private:
     std::uint64_t s_;
 };
 
-inline uint64_t NowUs() {
-    using namespace std::chrono;
-    return duration_cast<microseconds>(
-            high_resolution_clock::now().time_since_epoch()).count();
-}
+class Timer {
+public:
+    Timer() {
+        Clock();
+    }
+    void Clock() {
+        clock_time_ = std::chrono::steady_clock::now();
+    }
+
+    int GetDurationSeconds() const {
+        const auto end_time =
+            std::chrono::steady_clock::now();
+        const auto seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(end_time - clock_time_).count();
+        return seconds;
+    }
+    int GetDurationMilliseconds() const {
+        const auto end_time =
+            std::chrono::steady_clock::now();
+        const auto milliseconds =
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - clock_time_).count();
+        return milliseconds;
+    }
+
+private:
+    std::chrono::steady_clock::time_point clock_time_;
+};
+
 
 inline int RandInt(int l, int r) {
     std::uniform_int_distribution<int> dist(l,r);
@@ -105,6 +129,46 @@ inline std::vector<int> RandSample(int l, int r, int size) {
     return result;
 }
 
+inline NodePointer BuildBalancedTree(NodePointerList& nodes) {
+    std::function<NodePointer(NodePointer, int, int)> BuildBalanced = 
+        [&](NodePointer parent, int l, int r) -> NodePointer {
+            if (l > r) return nullptr;
+            int m = (l + r) / 2;
+            NodePointer node = nodes[m];
+            node->parent = parent;
+            node->lchild = BuildBalanced(node, l, m - 1);
+            node->rchild = BuildBalanced(node, m + 1, r);
+            return node;
+        };
+    NodePointer root = BuildBalanced(nullptr, 0, (int)nodes.size() - 1);
+    return root;
+}
+inline NodePointer BuildLeftSkewedTree(NodePointerList& nodes) {
+    std::function<NodePointer(NodePointer, int)> BuildLeftSkewed =
+        [&](NodePointer parent, int idx) -> NodePointer {
+            if (idx >= (int)nodes.size()) return nullptr;
+            NodePointer node = nodes[idx];
+            node->parent = parent;
+            node->lchild = BuildLeftSkewed(node, idx + 1);
+            node->rchild = nullptr;
+            return node;
+        };
+    NodePointer root = BuildLeftSkewed(nullptr, 0);
+    return root;
+}
+inline NodePointer BuildRightSkewedTree(NodePointerList& nodes) {
+    std::function<NodePointer(NodePointer, int)> BuildRightSkewed =
+        [&](NodePointer parent, int idx) -> NodePointer {
+            if (idx >= (int)nodes.size()) return nullptr;
+            NodePointer node = nodes[idx];
+            node->parent = parent;
+            node->lchild = nullptr;
+            node->rchild = BuildRightSkewed(node, idx + 1);
+            return node;
+        };
+    NodePointer root = BuildRightSkewed(nullptr, 0);
+    return root;
+}
 inline void ReplaceParentChild(NodePointer parent,
                                NodePointer old_child,
                                NodePointer new_child) {
@@ -145,29 +209,80 @@ inline void MirrorTree(NodePointer n) {
         MirrorTree(n->rchild);
     }
 }
-inline void GatherAllLeafNodesF(NodePointer node, std::vector<NodePointer> &buf) {
-    if (node) {
-        if (!node->lchild && !node->rchild) {
-            buf.emplace_back(node);
-        } else {
-            GatherAllLeafNodesF(node->lchild, buf);
-            GatherAllLeafNodesF(node->rchild, buf);
+
+class RotateNodeOp {
+public:
+    void Apply(std::vector<Block>& blocks, NodePointerList& nodes) {
+        num_nodes_ = nodes.size();
+        if (!Valid()) {
+            return;
         }
+        NodePointer n = nodes[RandInt(0, num_nodes_ - 1)];
+        block_ = &blocks[n->blockId];
+        block_->Rotate();
     }
-}
+    void Undo() {
+        if (!Valid()) {
+            return;
+        }
+        block_->Rotate();
+    }
+    bool Valid() const {
+        return num_nodes_ >= 1;
+    }
+private:
+    int num_nodes_{0};
+    Block * block_{nullptr};
+};
 
+class SwapNodeOp {
+public:
+    void Apply(NodePointer *root, NodePointerList& nodes) {
+        num_nodes_ = nodes.size();
+        if (!Valid()) {
+            return;
+        }
 
-struct LeafMoveOp {
-    NodePointer leaf;
-    NodePointer old_parent;
-    bool was_left_child;
+        auto buf = RandSample(0, num_nodes_-1, 2);
+        src_ = nodes[buf[0]];
+        dst_ = nodes[buf[1]];
+        root_ = root;
 
-    NodePointer new_parent;
-    bool inserted_as_left;
+        if (*root_ == src_) {
+            *root_ = dst_;
+        } else if (*root_ == dst_) {
+            *root_ = src_;
+        }
+        SwapNodeDirection(src_, dst_);
+    }
+    void Undo() {
+        if (!Valid()) {
+            return;
+        }
+        if (*root_ == src_) {
+            *root_ = dst_;
+        } else if (*root_ == dst_) {
+            *root_ = src_;
+        }
+        SwapNodeDirection(src_, dst_);
+    }
+    bool Valid() const {
+        return num_nodes_ >= 2;
+    }
 
-    void MoveLeafNodeOnce(NodePointer root) {
-        std::function<void(NodePointer, std::vector<NodePointer>&)> GatherAllLeafNodes =
-            [] (NodePointer node, std::vector<NodePointer> &buf) {
+private:
+    int num_nodes_{0};
+    NodePointer *root_{nullptr};
+    NodePointer src_{nullptr}, dst_{nullptr};
+};
+
+class LeafMoveOp {
+public:
+   LeafMoveOp() = default;
+
+    void Apply(NodePointer root) {
+        std::function<void(NodePointer, NodePointerList&)> GatherAllLeafNodes =
+            [&] (NodePointer node, NodePointerList &buf) {
             if (node) {
                 if (!node->lchild && !node->rchild) {
                     buf.emplace_back(node);
@@ -176,41 +291,76 @@ struct LeafMoveOp {
                     GatherAllLeafNodes(node->rchild, buf);
                 }
             }
-        }
-
-        std::vector<NodePointer> leaves;
+        };
+        NodePointerList leaves;
         GatherAllLeafNodes(root, leaves);
 
         // 隨機選擇葉節點
-        op.leaf = leaves[RandInt(0, (int)leaves.size() - 1)];
-        op.old_parent = op.leaf->parent;
-        op.was_left_child = (op.old_parent && op.old_parent->lchild == op.leaf);
+        leaf_ = leaves[RandInt(0, (int)leaves.size() - 1)];
+        old_parent_ = leaf_->parent;
+        was_left_child_ =
+            (old_parent_ && old_parent_->lchild == leaf_);
 
         // 將葉節點從舊位置移除
-        if (op.was_left_child) op.old_parent->lchild = nullptr;
-        else                   op.old_parent->rchild = nullptr;
-        op.leaf->parent = nullptr;
+        if (was_left_child_) {
+            old_parent_->lchild = nullptr;
+        } else {
+            old_parent_->rchild = nullptr;
+        }
+        leaf_->parent = nullptr;
 
         // 找可插入的新位置
-        std::vector<NodePointer> candidates;
-        std::function<void(NodePointer)> Collect = [&](NodePointer node) {
+        NodePointerList candidates;
+        std::function<void(NodePointer, NodePointerList&)> Collect =
+            [&] (NodePointer node, NodePointerList &buf) {
             if (!node) return;
             if (!node->lchild || !node->rchild) {
-                if (node != op.leaf) candidates.push_back(node); // 避免插入自己
+                if (node != leaf_) { candidates.push_back(node); } // 避免插入自己
             }
-            Collect(node->lchild);
-            Collect(node->rchild);
+            Collect(node->lchild, buf);
+            Collect(node->rchild, buf);
         };
-        Collect(tree.root);
+        Collect(root, candidates);
 
-        op.new_parent = candidates[RandInt(0, (int)candidates.size() - 1)];
-        op.inserted_as_left = !op.new_parent->lchild;
+        if (candidates.empty()) {
+            return;
+        }
+        new_parent_ = candidates[RandInt(0, (int)candidates.size() - 1)];
+        inserted_as_left_ = !new_parent_->lchild;
 
         // 插入
-        if (op.inserted_as_left) op.new_parent->lchild = op.leaf;
-        else                     op.new_parent->rchild = op.leaf;
-        op.leaf->parent = op.new_parent;
-
-        return op;
+        if (inserted_as_left_) {
+            new_parent_->lchild = leaf_;
+        } else {
+            new_parent_->rchild = leaf_;
+        }
+        leaf_->parent = new_parent_;
     }
+    void Undo() const {
+        // 從新位置移除
+        if (inserted_as_left_) {
+            new_parent_->lchild = nullptr;
+        } else {
+            new_parent_->rchild = nullptr;
+        }
+
+        // 還原到舊位置
+        if (was_left_child_) {
+            old_parent_->lchild = leaf_;
+        } else {
+            old_parent_->rchild = leaf_;
+        }
+        leaf_->parent = old_parent_;
+    }
+    bool Valid() const {
+        return new_parent_ != nullptr;
+    }
+
+private:
+    NodePointer leaf_{nullptr};
+    NodePointer old_parent_{nullptr};
+    bool was_left_child_{false};
+
+    NodePointer new_parent_{nullptr};
+    bool inserted_as_left_{false};
 };

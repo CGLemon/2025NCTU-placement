@@ -38,8 +38,7 @@ void Placer::ReadFile(const std::string& path) {
         SymmGroup& group = groups_[i];
         int cnt;
         fin >> tok >> group.name >> cnt;
-        // 隨機決定對稱軸
-        group.axis = RandInt(0,1) ? Axis::kHorizontal : Axis::kVertical;
+        group.axis = Axis::kVertical;
         group.gid = i;
 
         for (int j = 0; j < cnt; ++j) {
@@ -117,16 +116,10 @@ void Placer::RotateNode() {
 }
 
 void Placer::SwapNode() {
-    int num_nodes = hb_tree_.GetNumberNodes();
-    if (num_nodes < 2) {
+    SwapNodeOp op = hb_tree_.SwapNodeRandomize();
+    if (!op.Valid()) {
         return;
     }
-
-    auto buf = RandSample(0, num_nodes-1, 2);
-    int src_idx = buf[0];
-    int dst_idx = buf[1];
-
-    hb_tree_.SwapNode(src_idx, dst_idx);
     std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
     std::int64_t delta_area = new_area - curr_area_;
 
@@ -140,7 +133,7 @@ void Placer::SwapNode() {
             uphill_cnt_++;
         }
     } else {
-        hb_tree_.SwapNode(src_idx, dst_idx);
+        op.Undo();
         hb_tree_.PackAndGetArea(blocks_);
         reject_cnt_++;
     }
@@ -149,27 +142,33 @@ void Placer::SwapNode() {
 }
 
 void Placer::SwapOrRotateGroupNode() {
+
     if (groups_.empty()) {
         return;
     }
+    RotateNodeOp rot_op;
+    SwapNodeOp swap_op;
+    LeafMoveOp move_op;
+
 
     int idx = RandInt(0, (int)groups_.size()-1);
-    bool rot_op = RandInt(0, 1);
-    int src_idx = -1, dst_idx = -1;
+    int select_op = RandInt(0, 2);
 
-    if (rot_op) {
-        int num_nodes = hb_tree_.GetIsland(idx)->GetNumberNodes();
-        src_idx = RandInt(0, num_nodes-1);
-        hb_tree_.GetIsland(idx)->RotateNode(blocks_, src_idx);
-    } else {
-        int num_nodes = hb_tree_.GetIsland(idx)->GetNumberPairRepresentNodes();
-        if (num_nodes < 2) {
+    if (select_op == 0) {
+        rot_op = hb_tree_.GetIsland(idx)->RotateNodeRandomize(blocks_);
+        if (!rot_op.Valid()) {
             return;
         }
-        auto buf = RandSample(0, num_nodes-1, 2);
-        src_idx = buf[0];
-        dst_idx = buf[1];
-        hb_tree_.GetIsland(idx)->SwapNode(src_idx, dst_idx);
+    } else if (select_op == 1) {
+        swap_op = hb_tree_.GetIsland(idx)->SwapNodeRandomize();
+        if (!swap_op.Valid()) {
+            return;
+        }
+    } else if (select_op == 2) {
+        move_op = hb_tree_.GetIsland(idx)->MoveLeafNodeRandomize();
+        if (!move_op.Valid()) {
+            return;
+        }
     }
 
     std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
@@ -185,10 +184,12 @@ void Placer::SwapOrRotateGroupNode() {
             uphill_cnt_++;
         }
     } else {
-        if (rot_op) {
-           hb_tree_.GetIsland(idx)->RotateNode(blocks_, src_idx);
-        } else {
-           hb_tree_.GetIsland(idx)->SwapNode(src_idx, dst_idx);
+        if (select_op == 0) {
+            rot_op.Undo();
+        } else if (select_op == 1) {
+            swap_op.Undo();
+        } else if (select_op == 2) {
+            move_op.Undo();
         }
         hb_tree_.PackAndGetArea(blocks_);
         reject_cnt_++;
@@ -197,52 +198,106 @@ void Placer::SwapOrRotateGroupNode() {
     gen_cnt_++;
 }
 
-void Placer::MoveNode() {
+void Placer::MoveLeafNode() {
+    LeafMoveOp op = hb_tree_.MoveLeafNodeRandomize();
+    if (!op.Valid()) {
+        return;
+    }
 
+    std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
+    std::int64_t delta_area = new_area - curr_area_;
+
+    if (TryAcceptWithTemperature(delta_area)) {
+        curr_area_ = new_area;
+        if (new_area < best_area_) {
+            best_area_ = new_area;
+            best_blocks_ = blocks_;
+        }
+        if (delta_area > 0) {
+            uphill_cnt_++;
+        }
+    } else {
+        op.Undo();
+        hb_tree_.PackAndGetArea(blocks_);
+        reject_cnt_++;
+    }
+    num_simulations_++;
+    gen_cnt_++;
 }
 
-void Placer::ResetStats() {
+void Placer::UpdateStats() {
+    if (gen_cnt_ == reject_cnt_) {
+        continuous_reject_cnt_ += 1;
+    } else {
+        continuous_reject_cnt_ = 0;
+    }
     gen_cnt_ = 0;
     uphill_cnt_ = 0;
     reject_cnt_ = 0;
 }
 
 bool Placer::ShouldReduceTemperature() const {
-    constexpr int K = 20;
+    return true;
+}
+
+bool Placer::ShouldStopRound() const {
+    constexpr int K = 200;
     const int kStopFactor = blocks_.size() * K;
     const int kGenerationMin = kStopFactor * 2;
-    return uphill_cnt_ > kStopFactor ||
+    return stop_ ||
+               uphill_cnt_ > kStopFactor ||
                gen_cnt_ > kGenerationMin;
 }
 
-bool Placer::ShouldStop() const {
-    constexpr double kTemperatureMin = 0.1;
-    constexpr double kRejectRatio = 1.0;
-    return (double)reject_cnt_ / gen_cnt_ > kRejectRatio ||
-               temperature_ < kTemperatureMin;
+bool Placer::ShouldStopRunning() const {
+    return stop_ ||
+               continuous_reject_cnt_ >= 10 ||
+               temperature_ < 1.0;
 }
 
 void Placer::RunSimulatedAnnealing() {
     temperature_ = best_area_ / 10.0;
     num_simulations_ = 0;
+    continuous_reject_cnt_ = -1;
+    gen_cnt_ = 0;
+    uphill_cnt_ = 0;
+    reject_cnt_ = 0;
+    Timer timer;
+
+    stop_ = false;
+    int maxtime_sec = (5 * 60) - 10; // 10 秒當緩衝時間
 
     do {
-        ResetStats();
+        UpdateStats();
         do {
             curr_area_ = best_area_;
-            int move_type = RandInt(0, 2);
+            int move_type = RandInt(0, 3);
 
             switch (move_type) {
                 case 0: RotateNode(); break;
                 case 1: SwapNode(); break;
                 case 2: SwapOrRotateGroupNode(); break;
+                case 3: MoveLeafNode(); break;
                 default: ;
             }
             if (num_simulations_ % 1000 == 0) {
-                std::cerr << "[Step: " << num_simulations_ << "] Area = " << best_area_ << std::endl;
+                std::cerr << "[Step: " << num_simulations_
+                              << "] Area = " << best_area_ << std::endl;
             }
-        } while (!ShouldReduceTemperature());
-        temperature_ *= 0.95;
-    } while (!ShouldStop());
+            if (timer.GetDurationSeconds() >= maxtime_sec) {
+                std::cerr << "Time out!" << std::endl;
+                stop_ = true;
+            }
+        } while (!ShouldStopRound());
+        std::cerr << "gen_cnt = " << gen_cnt_ << std::endl;
+        std::cerr << "uphill_cnt = " << uphill_cnt_ << std::endl;
+        std::cerr << "reject_cnt = " << reject_cnt_ << std::endl;
+        std::cerr << "continuous_reject_cnt = " << continuous_reject_cnt_ << std::endl;
+        std::cerr << "temperature = " << temperature_ << std::endl;
+
+        if (ShouldReduceTemperature()) {
+            temperature_ *= 0.95;
+        }
+    } while (!ShouldStopRunning());
 }
 

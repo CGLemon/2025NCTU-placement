@@ -1,7 +1,6 @@
 #include <algorithm> 
 #include <functional>
 #include "hb_tree.hpp"
-#include "utils.hpp"
 
 void HbTree::Initialize(std::vector<Block> &blocks,
                         std::vector<SymmGroup> &groups) {
@@ -23,6 +22,13 @@ void HbTree::Initialize(std::vector<Block> &blocks,
         islands_.emplace_back(std::make_unique<AsfIsland>(&group));
         islands_.back()->Initialize(blocks);
     }
+
+    all_nodes_.reserve(solo_nodes_.size() + hier_nodes_.size());
+    all_nodes_.insert(std::end(all_nodes_),
+        std::begin(solo_nodes_), std::end(solo_nodes_));
+    all_nodes_.insert(std::end(all_nodes_),
+        std::begin(hier_nodes_), std::end(hier_nodes_));
+
     UpdateNodes(blocks);
     BuildInitialSolution();
 }
@@ -45,26 +51,12 @@ void HbTree::UpdateNodes(const std::vector<Block> &blocks) {
 }
 
 void HbTree::BuildInitialSolution() {
-    NodePointerList sorted;
-    sorted.reserve(solo_nodes_.size() + hier_nodes_.size());
-    sorted.insert(std::end(sorted), std::begin(solo_nodes_), std::end(solo_nodes_));
-    sorted.insert(std::end(sorted), std::begin(hier_nodes_), std::end(hier_nodes_));
-
+    NodePointerList sorted = all_nodes_;
     std::sort(sorted.begin(), sorted.end(),
               [](auto a, auto b){
                   return a->width * a->height > b->width * b->height;
               });
-    std::function<NodePointer(NodePointer, int, int)> BuildBalanced = 
-        [&](NodePointer parent, int l, int r) -> NodePointer {
-            if (l > r) return nullptr;
-            int m = (l + r) / 2;
-            NodePointer node = sorted[m];
-            node->parent = parent;
-            node->lchild = BuildBalanced(node, l, m - 1);
-            node->rchild = BuildBalanced(node, m + 1, r);
-            return node;
-        };
-    bs_tree_.root = BuildBalanced(nullptr, 0, (int)sorted.size() - 1);
+    bs_tree_.root = BuildLeftSkewedTree(sorted);
 }
 
 std::int64_t HbTree::PackAndGetArea(std::vector<Block> &blocks) {
@@ -106,7 +98,7 @@ std::int64_t HbTree::PackAndGetArea(std::vector<Block> &blocks) {
 }
 
 int HbTree::GetNumberNodes() const {
-    return solo_nodes_.size() + hier_nodes_.size();
+    return all_nodes_.size();
 }
 
 bool HbTree::IsSoloNode(const int idx) const {
@@ -141,15 +133,15 @@ void HbTree::RotateNode(std::vector<Block> &blocks, const int idx) {
     }
 }
 
-void HbTree::SwapNode(const int src_idx, const int dst_idx) {
-    NodePointer src = GetNode(src_idx);
-    NodePointer dst = GetNode(dst_idx);
-
-    // 更新  root
-    if (bs_tree_.root == src) {
-        bs_tree_.root = dst;
-    } else if (bs_tree_.root == dst) {
-        bs_tree_.root = src;
-    }
-    SwapNodeDirection(src, dst);
+SwapNodeOp HbTree::SwapNodeRandomize() {
+    SwapNodeOp op;
+    op.Apply(&bs_tree_.root, all_nodes_);
+    return op;
 }
+
+LeafMoveOp HbTree::MoveLeafNodeRandomize() {
+    LeafMoveOp op;
+    op.Apply(bs_tree_.root);
+    return op;
+}
+

@@ -16,44 +16,27 @@ void AsfIsland::BuildInitialSolution() {
               [](auto a, auto b){
                   return a->width * a->height > b->width * b->height;
               });
-    std::function<NodePointer(NodePointer, int, int)> BuildBalanced = 
-        [&](NodePointer parent, int l, int r) -> NodePointer {
-            if (l > r) return nullptr;
-            int m = (l + r) / 2;
-            NodePointer node = sorted[m];
-            node->parent = parent;
-            node->lchild = BuildBalanced(node, l, m - 1);
-            node->rchild = BuildBalanced(node, m + 1, r);
-            return node;
-        };
-
-    NodePointer root = BuildBalanced(nullptr, 0, (int)sorted.size() - 1);
-
+    if (sorted.empty()) {
+        pair_root_ = nullptr;
+    } else {
+        pair_root_ = BuildBalancedTree(sorted);
+    }
     // 2. 把所有 self_represent_nodes 串成一条链
-    for (NodePointer s: self_represent_nodes_) {
-        s->lchild = s->rchild = nullptr;
-        if (!root) { // root 還不存在：第一顆 self represent 當根
-            root = s;
-            continue;
-        }
+    sorted = self_represent_nodes_;
 
+    if (sorted.empty()) {
+        self_root_ = nullptr;
+    } else {
+        std::sort(sorted.begin(), sorted.end(),
+                  [](auto a, auto b){
+                      return a->width * a->height > b->width * b->height;
+                  });
         if (group_->axis == Axis::kVertical) {
-            // vertical branch -> right‐child
-            NodePointer curr = root;
-            while (curr->rchild) {
-                curr = curr->rchild;
-            }
-            curr->rchild = s;
+            self_root_ = BuildRightSkewedTree(sorted);
         } else {
-            // horizontal branch -> left‐child
-            NodePointer curr = root;
-            while (curr->lchild) {
-                curr = curr->lchild;
-            }
-            curr->lchild = s;
+            self_root_ = BuildLeftSkewedTree(sorted);
         }
     }
-    bs_tree_.root = root;
 }
 
 void AsfIsland::Initialize(std::vector<Block> &blocks) {
@@ -76,6 +59,13 @@ void AsfIsland::Initialize(std::vector<Block> &blocks) {
         self_represent_nodes_.back()->blockId = symm_self.id;
         block_ids_.emplace_back(symm_self.id);
     }
+
+    all_represent_nodes_.reserve(pair_represent_nodes_.size() + self_represent_nodes_.size());
+    all_represent_nodes_.insert(std::end(all_represent_nodes_),
+        std::begin(pair_represent_nodes_), std::end(pair_represent_nodes_));
+    all_represent_nodes_.insert(std::end(all_represent_nodes_),
+        std::begin(self_represent_nodes_), std::end(self_represent_nodes_));
+
     UpdateNodes(blocks);
     BuildInitialSolution();
 }
@@ -98,6 +88,33 @@ void AsfIsland::UpdateNodes(const std::vector<Block>& blocks) {
     }
 }
 
+NodePointer AsfIsland::GetTreesRoot() {
+    if (pair_root_) {
+        return pair_root_;
+    }
+    return self_root_;
+}
+
+NodePointer AsfIsland::TryConnectTrees() {
+    if (!pair_root_) {
+        return nullptr;
+    }
+    NodePointer connect_node = pair_root_;
+   
+    if (group_->axis == Axis::kVertical) {
+       while (connect_node->rchild) {
+           connect_node = connect_node->rchild;
+       }
+       connect_node->rchild = self_root_;
+    } else {
+       while (connect_node->lchild) {
+           connect_node = connect_node->lchild;
+       }
+       connect_node->lchild = self_root_;
+    }
+    return connect_node;
+}
+
 /********************************************************************
  *  pack()  —  1) 代表半平面打包          (bst.setPosition)
  *             2) 鏡射 mate / self 模組  (式 (1)(2))
@@ -106,6 +123,9 @@ void AsfIsland::UpdateNodes(const std::vector<Block>& blocks) {
 void AsfIsland::Pack(std::vector<Block>& blocks) {   
     /* ---------- 0) 打包代表半平面 ---------- */
     UpdateNodes(blocks);
+
+    NodePointer connect_node = TryConnectTrees();
+    bs_tree_.root = GetTreesRoot();
     bs_tree_.setPosition();
 
     /* ---------- 1) 掃描代表並鏡射 ---------- */
@@ -191,6 +211,14 @@ void AsfIsland::Pack(std::vector<Block>& blocks) {
     } else {
         axis_pos_ += dy;  // 水平對稱軸，y軸平移
     }
+
+    if (connect_node) {
+        if (group_->axis == Axis::kVertical) {
+           connect_node->rchild = nullptr;
+        } else {
+           connect_node->lchild = nullptr;
+        }
+    }
 }
 
 void AsfIsland::Mirror(std::vector<Block>& blocks) {
@@ -206,38 +234,23 @@ void AsfIsland::Mirror(std::vector<Block>& blocks) {
 }
 
 int AsfIsland::GetNumberNodes() const {
-    return pair_represent_nodes_.size() + self_represent_nodes_.size();
+    return all_represent_nodes_.size();
 }
 
-int AsfIsland::GetNumberPairRepresentNodes() const {
-    return pair_represent_nodes_.size();
+RotateNodeOp AsfIsland::RotateNodeRandomize(std::vector<Block>& blocks) {
+    RotateNodeOp op;
+    op.Apply(blocks, all_represent_nodes_);
+    return op;
 }
 
-NodePointer AsfIsland::GetNode(int idx) {
-    if (idx < (int)pair_represent_nodes_.size()) {
-        return pair_represent_nodes_[idx];
-    }
-    idx -= (int)pair_represent_nodes_.size();
-    if (idx < (int)self_represent_nodes_.size()) {
-        return self_represent_nodes_[idx];
-    }
-    return nullptr;
+SwapNodeOp AsfIsland::SwapNodeRandomize() {
+    SwapNodeOp op;
+    op.Apply(&pair_root_, pair_represent_nodes_);
+    return op;
 }
 
-void AsfIsland::SwapNode(const int src_idx, const int dst_idx) {
-    NodePointer src = GetNode(src_idx);
-    NodePointer dst = GetNode(dst_idx);
-
-    // 更新  root
-    if (bs_tree_.root == src) {
-        bs_tree_.root = dst;
-    } else if (bs_tree_.root == dst) {
-        bs_tree_.root = src;
-    }
-    SwapNodeDirection(src, dst);
-}
-
-void AsfIsland::RotateNode(std::vector<Block>& blocks, const int idx) {
-    NodePointer n = GetNode(idx);
-    blocks[n->blockId].Rotate();
+LeafMoveOp AsfIsland::MoveLeafNodeRandomize() {
+    LeafMoveOp op;
+    op.Apply(pair_root_);
+    return op;
 }
