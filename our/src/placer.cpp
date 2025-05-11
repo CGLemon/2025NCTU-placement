@@ -2,6 +2,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <cmath>
+#include <limits>
 #include <iostream>
 
 #include "placer.hpp"
@@ -62,25 +63,70 @@ void Placer::ReadFile(const std::string& path) {
     }
 
     hb_tree_.Initialize(blocks_, groups_);
-    best_area_ = hb_tree_.PackAndGetArea(blocks_);
+    best_blocks_ = blocks_;
+    best_cost_ = ComputeCost(best_blocks_);
 }
 
 void Placer::WriteFile(const std::string& path) {
     std::ofstream fout(path);
-    fout << "Area " << best_area_ << "\n\n";
+    std::int64_t best_area = ComputeArea(best_blocks_);
+
+    fout << "Area " << best_area << "\n\n";
     fout << "NumHardBlocks " << best_blocks_.size() << "\n";
     for (auto& b: best_blocks_ ){
         fout << b.name << " " << b.x << " " << b.y << " " << (b.rotated ? 1 : 0) << "\n";
     }
-    std::cout << "[INFO] final area = " << best_area_ << "\n";
+    std::cerr << "[INFO] final area = " << best_area << "\n";
 }
 
-bool Placer::TryAcceptWithTemperature(double delta_area) {
+std::int64_t Placer::ComputeArea(std::vector<Block>& blocks) {
+    return hb_tree_.PackAndGetArea(blocks);
+}
+
+std::int64_t Placer::ComputeTotalWirelength(const std::vector<Block>& blocks) {
+    std::int64_t min_x = std::numeric_limits<std::int64_t>::max();
+    std::int64_t min_y = std::numeric_limits<std::int64_t>::max();
+    std::int64_t max_x = std::numeric_limits<std::int64_t>::min();
+    std::int64_t max_y = std::numeric_limits<std::int64_t>::min();
+
+    for (const auto& block : blocks) {
+        std::int64_t center_x = block.x + block.GetRotatedWidth() / 2;
+        std::int64_t center_y = block.y + block.GetRotatedHeight() / 2;
+
+        min_x = std::min(min_x, center_x);
+        max_x = std::max(max_x, center_x);
+        min_y = std::min(min_y, center_y);
+        max_y = std::max(max_y, center_y);
+    }
+
+    return (max_x - min_x) + (max_y - min_y); // HPWL
+}
+
+void Placer::ComputeBaseArea(std::vector<Block>& blocks) {
+    base_area_ = ComputeArea(blocks);
+    base_hpwl_ = ComputeTotalWirelength(blocks);
+}
+
+std::int64_t Placer::ComputeCost(std::vector<Block>& blocks) {
+    constexpr double kAlpha = 0.0;
+    constexpr double kBeta = 1.0;
+    std::int64_t norm_area = ComputeArea(blocks);
+    std::int64_t norm_hpwl = ComputeTotalWirelength(blocks);
+
+    if (base_area_ > base_hpwl_) {
+        norm_hpwl = std::round(norm_hpwl * ((double)base_area_/base_hpwl_));
+    } else {
+        norm_area = std::round(norm_area * ((double)base_hpwl_/base_area_));
+    }
+    return std::round(kAlpha * norm_area + kBeta * norm_hpwl);
+}
+
+bool Placer::TryAcceptSimulation(double delta_cost) {
     bool accept = false;
-    if (delta_area <= 0) {
+    if (delta_cost <= 0) {
         accept = true;  // 面積下降，直接接受
     } else if (temperature_ > 0) {
-        double prob = std::exp(-1.0 * delta_area / temperature_);
+        double prob = std::exp(-1.0 * delta_cost / temperature_);
         accept = Rand01() < prob;
     }
     return accept;
@@ -94,16 +140,17 @@ void Placer::RotateNode() {
 
     int rot_id = RandInt(0, num_nodes - 1);
     hb_tree_.RotateNode(blocks_, rot_id);
-    std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
-    std::int64_t delta_area = new_area - curr_area_;
 
-    if (TryAcceptWithTemperature(delta_area)) {
-        curr_area_ = new_area;
-        if (new_area < best_area_) {
-            best_area_ = new_area;
+    std::int64_t new_cost = ComputeCost(blocks_);
+    std::int64_t delta_cost = new_cost - curr_cost_;
+
+    if (TryAcceptSimulation(delta_cost)) {
+        curr_cost_ = new_cost;
+        if (new_cost < best_cost_) {
+            best_cost_ = new_cost;
             best_blocks_ = blocks_;
         }
-        if (delta_area > 0) {
+        if (delta_cost > 0) {
             uphill_cnt_++;
         }
     } else {
@@ -120,16 +167,16 @@ void Placer::SwapNode() {
     if (!op.Valid()) {
         return;
     }
-    std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
-    std::int64_t delta_area = new_area - curr_area_;
+    std::int64_t new_cost = ComputeCost(blocks_);
+    std::int64_t delta_cost = new_cost - curr_cost_;
 
-    if (TryAcceptWithTemperature(delta_area)) {
-        curr_area_ = new_area;
-        if (new_area < best_area_) {
-            best_area_ = new_area;
+    if (TryAcceptSimulation(delta_cost)) {
+        curr_cost_ = new_cost;
+        if (new_cost < best_cost_) {
+            best_cost_ = new_cost;
             best_blocks_ = blocks_;
         }
-        if (delta_area > 0) {
+        if (delta_cost > 0) {
             uphill_cnt_++;
         }
     } else {
@@ -171,16 +218,16 @@ void Placer::SwapOrRotateGroupNode() {
         }
     }
 
-    std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
-    std::int64_t delta_area = new_area - curr_area_;
+    std::int64_t new_cost = ComputeCost(blocks_);
+    std::int64_t delta_cost = new_cost - curr_cost_;
 
-    if (TryAcceptWithTemperature(delta_area)) {
-        curr_area_ = new_area;
-        if (new_area < best_area_) {
-            best_area_ = new_area;
+    if (TryAcceptSimulation(delta_cost)) {
+        curr_cost_ = new_cost;
+        if (new_cost < best_cost_) {
+            best_cost_ = new_cost;
             best_blocks_ = blocks_;
         }
-        if (delta_area > 0) {
+        if (delta_cost > 0) {
             uphill_cnt_++;
         }
     } else {
@@ -204,16 +251,16 @@ void Placer::MoveLeafNode() {
         return;
     }
 
-    std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
-    std::int64_t delta_area = new_area - curr_area_;
+    std::int64_t new_cost = ComputeCost(blocks_);
+    std::int64_t delta_cost = new_cost - curr_cost_;
 
-    if (TryAcceptWithTemperature(delta_area)) {
-        curr_area_ = new_area;
-        if (new_area < best_area_) {
-            best_area_ = new_area;
+    if (TryAcceptSimulation(delta_cost)) {
+        curr_cost_ = new_cost;
+        if (new_cost < best_cost_) {
+            best_cost_ = new_cost;
             best_blocks_ = blocks_;
         }
-        if (delta_area > 0) {
+        if (delta_cost > 0) {
             uphill_cnt_++;
         }
     } else {
@@ -256,7 +303,7 @@ bool Placer::ShouldStopRunning() const {
 }
 
 void Placer::RunSimulatedAnnealing() {
-    temperature_ = best_area_ / 10.0;
+    temperature_ = best_cost_ / 10.0;
     num_simulations_ = 0;
     continuous_reject_cnt_ = -1;
     gen_cnt_ = 0;
@@ -269,8 +316,9 @@ void Placer::RunSimulatedAnnealing() {
 
     do {
         UpdateStats();
+        ComputeBaseArea(blocks_);
         do {
-            curr_area_ = best_area_;
+            curr_cost_ = best_cost_;
             int move_type = RandInt(0, 3);
 
             switch (move_type) {
@@ -282,7 +330,12 @@ void Placer::RunSimulatedAnnealing() {
             }
             if (num_simulations_ % 1000 == 0) {
                 std::cerr << "[Step: " << num_simulations_
-                              << "] Area = " << best_area_ << std::endl;
+                              << "] Area = " << ComputeArea(best_blocks_)
+                              << " | HPWL = "
+                              << ComputeTotalWirelength(best_blocks_)
+                              << " | Cost = "
+                              << ComputeCost(best_blocks_)
+                              << std::endl;
             }
             if (timer.GetDurationSeconds() >= maxtime_sec) {
                 std::cerr << "Time out!" << std::endl;

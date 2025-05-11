@@ -3,6 +3,7 @@
 #include <climits>
 #include <cstdint>
 #include <stack>
+#include <limits>
 
 #include "asf_island.hpp"
 #include "utils.hpp"

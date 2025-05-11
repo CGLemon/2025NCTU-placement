@@ -16,7 +16,12 @@ public:
     void WriteFile(const std::string& path);
 
 private:
-    bool TryAcceptWithTemperature(double delta_area);
+    std::int64_t ComputeArea(std::vector<Block>& blocks);
+    std::int64_t ComputeTotalWirelength(const std::vector<Block>& blocks);
+    void ComputeBaseArea(std::vector<Block>& blocks);
+    std::int64_t ComputeCost(std::vector<Block>& blocks);
+
+    bool TryAcceptSimulation(double delta_area);
     int TryGetSymmMate(int idx) const;
     void RotateNode();
     void SwapNode();
@@ -36,8 +41,14 @@ private:
     HbTree hb_tree_;
 
     double temperature_;
-    std::int64_t best_area_;
-    std::int64_t curr_area_;
+    std::int64_t best_cost_;
+    std::int64_t curr_cost_;
+
+    // std::int64_t best_area_;
+    // std::int64_t curr_area_;
+
+    std::int64_t base_area_;
+    std::int64_t base_hpwl_;
 
     int num_simulations_;
     int gen_cnt_;
