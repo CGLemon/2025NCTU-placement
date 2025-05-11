@@ -20,9 +20,10 @@ public:
     std::int64_t PackAndGetArea(std::vector<Block> &blocks);
 
     int GetNumberNodes() const;
-
+    bool IsSoloNode(const int idx) const;
     NodePointer GetNode(int idx);
     AsfIsland * GetIsland(int idx);
+    void RotateNode(std::vector<Block> &blocks, const int idx);
     void SwapNode(const int src_idx, const int dst_idx);
 
 private:

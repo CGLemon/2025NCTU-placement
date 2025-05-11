@@ -109,6 +109,10 @@ int HbTree::GetNumberNodes() const {
     return solo_nodes_.size() + hier_nodes_.size();
 }
 
+bool HbTree::IsSoloNode(const int idx) const {
+    return idx < (int)solo_nodes_.size();
+}
+
 NodePointer HbTree::GetNode(int idx) {
     if (idx < (int)solo_nodes_.size()) {
         return solo_nodes_[idx];
@@ -125,6 +129,16 @@ AsfIsland * HbTree::GetIsland(int idx) {
         return islands_[idx].get();
     }
     return nullptr;
+}
+
+void HbTree::RotateNode(std::vector<Block> &blocks, const int idx) {
+    NodePointer n = GetNode(idx);
+
+    if (IsSoloNode(idx)) {
+        blocks[n->blockId].Rotate();
+    } else {
+        islands_[n->blockId]->Mirror(blocks);
+    }
 }
 
 void HbTree::SwapNode(const int src_idx, const int dst_idx) {

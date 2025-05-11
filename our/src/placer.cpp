@@ -76,32 +76,6 @@ void Placer::WriteFile(const std::string& path) {
     std::cout << "[INFO] final area = " << best_area_ << "\n";
 }
 
-int Placer::TryGetSymmMate(int idx) const {
-    const Block& block = blocks_[idx];
-    if (block.IsSolo()) {
-        return -1;
-    }
-    const SymmGroup& group = groups_[block.gid];
-
-    /* ---------- 1) 先找 symmetry-pair ---------- */
-    for (const auto& pair: group.pairs) {
-        if (idx == pair.aid) {
-            return pair.bid;
-        }
-        if (idx == pair.bid) {
-            return pair.aid;
-        }
-    }
-
-    /* ---------- 2) 再檢查 self-symmetric ---------- */
-    for (const auto& self: group.selfs) {
-        if (idx == self.id) {
-            return self.id;
-        }
-    }
-    return -1; // 不應進到這裡
-}
-
 bool Placer::TryAcceptWithTemperature(double delta_area) {
     bool accept = false;
     if (delta_area <= 0) {
@@ -113,16 +87,14 @@ bool Placer::TryAcceptWithTemperature(double delta_area) {
     return accept;
 }
 
-void Placer::RotateBlock() {
-    int rot_id = RandInt(0, (int)blocks_.size() - 1);
-    int mate_id = TryGetSymmMate(rot_id);
-    if (mate_id != -1) {
-        blocks_[rot_id].Rotate();
-        blocks_[mate_id].Rotate();
-    } else {
-        blocks_[rot_id].Rotate();
+void Placer::RotateNode() {
+    int num_nodes = hb_tree_.GetNumberNodes();
+    if (num_nodes < 2) {
+        return;
     }
 
+    int rot_id = RandInt(0, num_nodes - 1);
+    hb_tree_.RotateNode(blocks_, rot_id);
     std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
     std::int64_t delta_area = new_area - curr_area_;
 
@@ -136,15 +108,12 @@ void Placer::RotateBlock() {
             uphill_cnt_++;
         }
     } else {
-        if (mate_id != -1) {
-            blocks_[rot_id].Rotate();
-            blocks_[mate_id].Rotate();
-        } else {
-            blocks_[rot_id].Rotate();
-        }
+        hb_tree_.RotateNode(blocks_, rot_id);
         hb_tree_.PackAndGetArea(blocks_);
         reject_cnt_++;
     }
+    num_simulations_++;
+    gen_cnt_++;
 }
 
 void Placer::SwapNode() {
@@ -175,28 +144,34 @@ void Placer::SwapNode() {
         hb_tree_.PackAndGetArea(blocks_);
         reject_cnt_++;
     }
+    num_simulations_++;
+    gen_cnt_++;
 }
 
-void Placer::MoveNode() {
-
-}
-
-void Placer::SwapGroupNode() {
+void Placer::SwapOrRotateGroupNode() {
     if (groups_.empty()) {
         return;
     }
 
     int idx = RandInt(0, (int)groups_.size()-1);
-    int num_nodes = hb_tree_.GetIsland(idx)->GetNumberPairRepresentNodes();
-    if (num_nodes < 2) {
-        return;
+    bool rot_op = RandInt(0, 1);
+    int src_idx = -1, dst_idx = -1;
+
+    if (rot_op) {
+        int num_nodes = hb_tree_.GetIsland(idx)->GetNumberNodes();
+        src_idx = RandInt(0, num_nodes-1);
+        hb_tree_.GetIsland(idx)->RotateNode(blocks_, src_idx);
+    } else {
+        int num_nodes = hb_tree_.GetIsland(idx)->GetNumberPairRepresentNodes();
+        if (num_nodes < 2) {
+            return;
+        }
+        auto buf = RandSample(0, num_nodes-1, 2);
+        src_idx = buf[0];
+        dst_idx = buf[1];
+        hb_tree_.GetIsland(idx)->SwapNode(src_idx, dst_idx);
     }
 
-    auto buf = RandSample(0, num_nodes-1, 2);
-    int src_idx = buf[0];
-    int dst_idx = buf[1];
-
-    hb_tree_.GetIsland(idx)->SwapNode(src_idx, dst_idx);
     std::int64_t new_area = hb_tree_.PackAndGetArea(blocks_);
     std::int64_t delta_area = new_area - curr_area_;
 
@@ -210,10 +185,20 @@ void Placer::SwapGroupNode() {
             uphill_cnt_++;
         }
     } else {
-        hb_tree_.GetIsland(idx)->SwapNode(src_idx, dst_idx);
+        if (rot_op) {
+           hb_tree_.GetIsland(idx)->RotateNode(blocks_, src_idx);
+        } else {
+           hb_tree_.GetIsland(idx)->SwapNode(src_idx, dst_idx);
+        }
         hb_tree_.PackAndGetArea(blocks_);
         reject_cnt_++;
     }
+    num_simulations_++;
+    gen_cnt_++;
+}
+
+void Placer::MoveNode() {
+
 }
 
 void Placer::ResetStats() {
@@ -248,16 +233,14 @@ void Placer::RunSimulatedAnnealing() {
             int move_type = RandInt(0, 2);
 
             switch (move_type) {
-                case 0: RotateBlock(); break;
+                case 0: RotateNode(); break;
                 case 1: SwapNode(); break;
-                case 2: SwapGroupNode(); break;
+                case 2: SwapOrRotateGroupNode(); break;
                 default: ;
             }
             if (num_simulations_ % 1000 == 0) {
                 std::cerr << "[Step: " << num_simulations_ << "] Area = " << best_area_ << std::endl;
             }
-            num_simulations_++;
-            gen_cnt_++;
         } while (!ShouldReduceTemperature());
         temperature_ *= 0.95;
     } while (!ShouldStop());

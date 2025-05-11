@@ -111,6 +111,7 @@ void AsfIsland::Pack(std::vector<Block>& blocks) {
     /* ---------- 1) 掃描代表並鏡射 ---------- */
     std::int64_t min_x = LLONG_MAX, min_y = LLONG_MAX;
     std::int64_t max_x = LLONG_MIN, max_y = LLONG_MIN;
+    axis_pos_ = 0;
 
     std::stack<NodePointer> stk;
     stk.emplace(bs_tree_.root);
@@ -183,6 +184,25 @@ void AsfIsland::Pack(std::vector<Block>& blocks) {
 
     bbox_w_ = max_x - min_x;
     bbox_h_ = max_y - min_y;
+
+    // 根據對稱軸方向正確更新軸位置
+    if (group_->axis == Axis::kVertical) {
+        axis_pos_ += dx;  // 垂直對稱軸，x軸平移
+    } else {
+        axis_pos_ += dy;  // 水平對稱軸，y軸平移
+    }
+}
+
+void AsfIsland::Mirror(std::vector<Block>& blocks) {
+    if (group_->axis == Axis::kVertical) {
+        group_->axis = Axis::kHorizontal;
+    } else {
+        group_->axis = Axis::kVertical;
+    }
+    for (auto id: block_ids_) {
+        blocks[id].Rotate();
+    }
+    MirrorTree(bs_tree_.root);
 }
 
 int AsfIsland::GetNumberNodes() const {
@@ -215,4 +235,9 @@ void AsfIsland::SwapNode(const int src_idx, const int dst_idx) {
         bs_tree_.root = src;
     }
     SwapNodeDirection(src, dst);
+}
+
+void AsfIsland::RotateNode(std::vector<Block>& blocks, const int idx) {
+    NodePointer n = GetNode(idx);
+    blocks[n->blockId].Rotate();
 }

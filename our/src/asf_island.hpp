@@ -16,10 +16,12 @@ public:
     void BuildInitialSolution();
     void UpdateNodes(const std::vector<Block>& blocks);
 
+    void Mirror(std::vector<Block>& blocks);
     int GetNumberNodes() const;
     int GetNumberPairRepresentNodes() const;
     NodePointer GetNode(int idx);
     void SwapNode(const int src_idx, const int dst_idx);
+    void RotateNode(std::vector<Block>& blocks, const int idx);
 
     inline int GetWidth() const { return bbox_w_; }
     inline int GetHeight() const { return bbox_h_; }

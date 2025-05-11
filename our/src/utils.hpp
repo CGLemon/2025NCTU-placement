@@ -138,25 +138,79 @@ inline void SwapNodeDirection(NodePointer src, NodePointer dst) {
     if (dst->lchild) dst->lchild->parent = dst;
     if (dst->rchild) dst->rchild->parent = dst;
 }
-inline void GatherAllLeafNodes(NodePointer node, std::vector<NodePointer> &buf) {
+inline void MirrorTree(NodePointer n) {
+    if (n) {
+        std::swap(n->lchild, n->rchild);
+        MirrorTree(n->lchild);
+        MirrorTree(n->rchild);
+    }
+}
+inline void GatherAllLeafNodesF(NodePointer node, std::vector<NodePointer> &buf) {
     if (node) {
         if (!node->lchild && !node->rchild) {
             buf.emplace_back(node);
         } else {
-            GatherAllLeafNodes(node->lchild, buf);
-            GatherAllLeafNodes(node->rchild, buf);
+            GatherAllLeafNodesF(node->lchild, buf);
+            GatherAllLeafNodesF(node->rchild, buf);
         }
     }
 }
-inline void GatherAllInsertNodes(NodePointer node, std::vector<NodePointer> &buf) {
-    if (node) {
-        if (!node->lchild) {
-            buf.emplace_back(node);
+
+
+struct LeafMoveOp {
+    NodePointer leaf;
+    NodePointer old_parent;
+    bool was_left_child;
+
+    NodePointer new_parent;
+    bool inserted_as_left;
+
+    void MoveLeafNodeOnce(NodePointer root) {
+        std::function<void(NodePointer, std::vector<NodePointer>&)> GatherAllLeafNodes =
+            [] (NodePointer node, std::vector<NodePointer> &buf) {
+            if (node) {
+                if (!node->lchild && !node->rchild) {
+                    buf.emplace_back(node);
+                } else {
+                    GatherAllLeafNodes(node->lchild, buf);
+                    GatherAllLeafNodes(node->rchild, buf);
+                }
+            }
         }
-        if (!node->rchild) {
-            buf.emplace_back(node);
-        }
-        GatherAllInsertNodes(node->lchild, buf);
-        GatherAllInsertNodes(node->rchild, buf);
+
+        std::vector<NodePointer> leaves;
+        GatherAllLeafNodes(root, leaves);
+
+        // 隨機選擇葉節點
+        op.leaf = leaves[RandInt(0, (int)leaves.size() - 1)];
+        op.old_parent = op.leaf->parent;
+        op.was_left_child = (op.old_parent && op.old_parent->lchild == op.leaf);
+
+        // 將葉節點從舊位置移除
+        if (op.was_left_child) op.old_parent->lchild = nullptr;
+        else                   op.old_parent->rchild = nullptr;
+        op.leaf->parent = nullptr;
+
+        // 找可插入的新位置
+        std::vector<NodePointer> candidates;
+        std::function<void(NodePointer)> Collect = [&](NodePointer node) {
+            if (!node) return;
+            if (!node->lchild || !node->rchild) {
+                if (node != op.leaf) candidates.push_back(node); // 避免插入自己
+            }
+            Collect(node->lchild);
+            Collect(node->rchild);
+        };
+        Collect(tree.root);
+
+        op.new_parent = candidates[RandInt(0, (int)candidates.size() - 1)];
+        op.inserted_as_left = !op.new_parent->lchild;
+
+        // 插入
+        if (op.inserted_as_left) op.new_parent->lchild = op.leaf;
+        else                     op.new_parent->rchild = op.leaf;
+        op.leaf->parent = op.new_parent;
+
+        return op;
     }
-}
+};

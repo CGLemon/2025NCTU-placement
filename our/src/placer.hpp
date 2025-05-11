@@ -18,9 +18,9 @@ public:
 private:
     bool TryAcceptWithTemperature(double delta_area);
     int TryGetSymmMate(int idx) const;
-    void RotateBlock();
+    void RotateNode();
     void SwapNode();
-    void SwapGroupNode();
+    void SwapOrRotateGroupNode();
     void MoveNode();
     void ResetStats();
 
@@ -30,7 +30,6 @@ private:
     std::vector<Block> blocks_;       // 所有 HardBlock
     std::vector<SymmGroup> groups_;   // 對稱群
     NameToIdMap blockname_to_id_map_; // block name -> idx
-
 
     std::vector<Block> best_blocks_;  // 所有 HardBlock
     HbTree hb_tree_;
