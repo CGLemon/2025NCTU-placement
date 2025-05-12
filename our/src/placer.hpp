@@ -30,7 +30,6 @@ private:
     void MoveLeafNode();
     void UpdateStats();
 
-    bool ShouldReduceTemperature() const;
     bool ShouldStopRound() const;
     bool ShouldStopRunning() const;
 
@@ -49,14 +48,16 @@ private:
     std::int64_t base_area_;
     std::int64_t base_hpwl_;
 
+    bool found_bestcost_;
+    int not_found_bestcost_accum_;
+    int beta_reduction_stage_;
+
     int num_simulations_;
     int num_iterations_;
-    int beta_reduction_stage_;
 
     int gen_cnt_;
     int reject_cnt_;
     int uphill_cnt_;
-    int continuous_reject_cnt_;
     bool stop_;
 };
 

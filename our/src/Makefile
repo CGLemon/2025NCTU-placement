@@ -9,3 +9,6 @@ TARGET   := ../bin/hw4
 release:
 	@mkdir -p ../bin
 	$(CXX) $(SRCS) -o $(TARGET) $(CXXFLAGS)
+
+clean:
+	@rm $(TARGET)

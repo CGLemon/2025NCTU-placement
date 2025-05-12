@@ -133,14 +133,10 @@ std::int64_t Placer::ComputeCost(std::vector<Block>& blocks) {
 }
 
 void Placer::UpdateCostFactorStage() {
-    if (continuous_reject_cnt_ > 20) {
-        beta_reduction_stage_ = std::max(beta_reduction_stage_, 4);
-    } else if (continuous_reject_cnt_ > 15) {
-        beta_reduction_stage_ = std::max(beta_reduction_stage_, 3);
-    } else if (continuous_reject_cnt_ > 10) {
-        beta_reduction_stage_ = std::max(beta_reduction_stage_, 2);
-    } else if (continuous_reject_cnt_ > 5) {
-        beta_reduction_stage_ = std::max(beta_reduction_stage_, 1);
+    if (beta_reduction_stage_ < 4 &&
+            not_found_bestcost_accum_ >= 15) {
+        beta_reduction_stage_ += 1;
+        not_found_bestcost_accum_ = 0;
     }
 }
 
@@ -174,6 +170,7 @@ void Placer::RotateNode() {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
             best_area_ = ComputeArea(best_blocks_);
+            found_bestcost_ = true;
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -201,6 +198,7 @@ void Placer::SwapNode() {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
             best_area_ = ComputeArea(best_blocks_);
+            found_bestcost_ = true;
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -253,6 +251,7 @@ void Placer::SwapOrRotateGroupNode() {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
             best_area_ = ComputeArea(best_blocks_);
+            found_bestcost_ = true;
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -287,6 +286,7 @@ void Placer::MoveLeafNode() {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
             best_area_ = ComputeArea(best_blocks_);
+            found_bestcost_ = true;
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -302,26 +302,14 @@ void Placer::MoveLeafNode() {
 
 void Placer::UpdateStats() {
     num_iterations_ += 1;
-    if (num_iterations_ == 1) {
-        continuous_reject_cnt_ = 0;
-    } else {
-        if (gen_cnt_ == reject_cnt_) {
-            continuous_reject_cnt_ += 1;
-        } else {
-            continuous_reject_cnt_ = 0;
-        }
-    }
     gen_cnt_ = 0;
     uphill_cnt_ = 0;
     reject_cnt_ = 0;
-}
-
-bool Placer::ShouldReduceTemperature() const {
-    return true;
+    found_bestcost_ = false;
 }
 
 bool Placer::ShouldStopRound() const {
-    constexpr int K = 200;
+    constexpr int K = 50;
     const int kStopFactor = blocks_.size() * K;
     const int kGenerationMin = kStopFactor * 2;
     return stop_ ||
@@ -331,7 +319,7 @@ bool Placer::ShouldStopRound() const {
 
 bool Placer::ShouldStopRunning() const {
     return stop_ ||
-               continuous_reject_cnt_ >= 50 ||
+               not_found_bestcost_accum_ >= 50 ||
                temperature_ < 1.0;
 }
 
@@ -339,10 +327,11 @@ void Placer::RunSimulatedAnnealing() {
     temperature_ = best_cost_ / 10.0;
     num_simulations_ = 0;
     num_iterations_ = 0;
+    not_found_bestcost_accum_ = 0;
     Timer timer;
 
     stop_ = false;
-    int maxtime_sec = (5 * 60) - 10; // 10 秒當緩衝時間
+    int maxtime_sec = (5 * 60) - 5; // 5 秒當緩衝時間
 
     do {
         UpdateStats();
@@ -372,15 +361,20 @@ void Placer::RunSimulatedAnnealing() {
                 stop_ = true;
             }
         } while (!ShouldStopRound());
-        std::cerr << "gen_cnt = " << gen_cnt_ << std::endl;
-        std::cerr << "uphill_cnt = " << uphill_cnt_ << std::endl;
-        std::cerr << "reject_cnt = " << reject_cnt_ << std::endl;
-        std::cerr << "continuous_reject_cnt = " << continuous_reject_cnt_ << std::endl;
-        std::cerr << "beta_reduction_stage = " << beta_reduction_stage_ << std::endl;
-        std::cerr << "temperature = " << temperature_ << std::endl;
+        // std::cerr << "gen_cnt = " << gen_cnt_ << std::endl;
+        // std::cerr << "uphill_cnt = " << uphill_cnt_ << std::endl;
+        // std::cerr << "reject_cnt = " << reject_cnt_ << std::endl;
+        // std::cerr << "not_found_bestcost_accum = " << not_found_bestcost_accum_ << std::endl;
+        // std::cerr << "beta_reduction_stage = " << beta_reduction_stage_ << std::endl;
+        // std::cerr << "temperature = " << temperature_ << std::endl;
 
-        if (ShouldReduceTemperature()) {
-            temperature_ *= 0.95;
+        if (!found_bestcost_) {
+            temperature_ *= 0.9;
+        }
+        if (found_bestcost_) {
+            not_found_bestcost_accum_ = 0;
+        } else {
+            not_found_bestcost_accum_ += 1;
         }
         UpdateCostFactorStage();
     } while (!ShouldStopRunning());
