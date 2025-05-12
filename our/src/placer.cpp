@@ -64,19 +64,22 @@ void Placer::ReadFile(const std::string& path) {
 
     hb_tree_.Initialize(blocks_, groups_);
     best_blocks_ = blocks_;
+
+    beta_reduction_stage_ = 0;
+    ComputeBaseFactor(best_blocks_);
+    best_area_ = ComputeArea(best_blocks_);
     best_cost_ = ComputeCost(best_blocks_);
 }
 
 void Placer::WriteFile(const std::string& path) {
     std::ofstream fout(path);
-    std::int64_t best_area = ComputeArea(best_blocks_);
 
-    fout << "Area " << best_area << "\n\n";
+    fout << "Area " << best_area_ << "\n\n";
     fout << "NumHardBlocks " << best_blocks_.size() << "\n";
-    for (auto& b: best_blocks_ ){
+    for (auto& b: best_blocks_ ) {
         fout << b.name << " " << b.x << " " << b.y << " " << (b.rotated ? 1 : 0) << "\n";
     }
-    std::cerr << "[INFO] final area = " << best_area << "\n";
+    std::cerr << "[INFO] final area = " << best_area_ << "\n";
 }
 
 std::int64_t Placer::ComputeArea(std::vector<Block>& blocks) {
@@ -84,41 +87,61 @@ std::int64_t Placer::ComputeArea(std::vector<Block>& blocks) {
 }
 
 std::int64_t Placer::ComputeTotalWirelength(const std::vector<Block>& blocks) {
-    std::int64_t min_x = std::numeric_limits<std::int64_t>::max();
-    std::int64_t min_y = std::numeric_limits<std::int64_t>::max();
-    std::int64_t max_x = std::numeric_limits<std::int64_t>::min();
-    std::int64_t max_y = std::numeric_limits<std::int64_t>::min();
+    auto ManhattanDistance = [](const Block& a, const Block& b) -> double {
+        double ax = a.x + a.GetRotatedWidth() / 2;
+        double ay = a.y + a.GetRotatedHeight() / 2;
+        double bx = b.x + b.GetRotatedWidth() / 2;
+        double by = b.y + b.GetRotatedHeight() / 2;
+        return std::abs(ax - bx) + std::abs(ay - by);
+    };
 
-    for (const auto& block : blocks) {
-        std::int64_t center_x = block.x + block.GetRotatedWidth() / 2;
-        std::int64_t center_y = block.y + block.GetRotatedHeight() / 2;
+    double total_wirelength = 0.0;
+    const int bsize = blocks.size();
 
-        min_x = std::min(min_x, center_x);
-        max_x = std::max(max_x, center_x);
-        min_y = std::min(min_y, center_y);
-        max_y = std::max(max_y, center_y);
+    for (int i = 0; i < bsize; ++i) {
+        for (int j = i + 1; j < bsize; ++j) {
+            total_wirelength +=
+                ManhattanDistance(blocks[i], blocks[j]);
+        }
     }
-
-    return (max_x - min_x) + (max_y - min_y); // HPWL
+    return std::round<std::int64_t>(total_wirelength);
 }
 
-void Placer::ComputeBaseArea(std::vector<Block>& blocks) {
+void Placer::ComputeBaseFactor(std::vector<Block>& blocks) {
     base_area_ = ComputeArea(blocks);
     base_hpwl_ = ComputeTotalWirelength(blocks);
 }
 
 std::int64_t Placer::ComputeCost(std::vector<Block>& blocks) {
-    constexpr double kAlpha = 0.0;
-    constexpr double kBeta = 1.0;
-    std::int64_t norm_area = ComputeArea(blocks);
-    std::int64_t norm_hpwl = ComputeTotalWirelength(blocks);
-
-    if (base_area_ > base_hpwl_) {
-        norm_hpwl = std::round(norm_hpwl * ((double)base_area_/base_hpwl_));
-    } else {
-        norm_area = std::round(norm_area * ((double)base_hpwl_/base_area_));
+    double alpha = 1.0;
+    double beta = 1.0;
+    if (beta_reduction_stage_ == 0) {
+        beta = 8.0;
+    } else if (beta_reduction_stage_ == 1) {
+        beta = 4.0;
+    } else if (beta_reduction_stage_ == 2) {
+        beta = 1.0;
+    } else if (beta_reduction_stage_ == 3) {
+        beta = 0.5;
+    } else if (beta_reduction_stage_ == 4) {
+        beta = 0.0;
     }
-    return std::round(kAlpha * norm_area + kBeta * norm_hpwl);
+    double norm_factor = (double)base_area_/base_hpwl_;
+    const double cost = alpha * ComputeArea(blocks) +
+        beta * norm_factor * ComputeTotalWirelength(blocks);
+    return std::round<std::int64_t>(cost);
+}
+
+void Placer::UpdateCostFactorStage() {
+    if (continuous_reject_cnt_ > 20) {
+        beta_reduction_stage_ = std::max(beta_reduction_stage_, 4);
+    } else if (continuous_reject_cnt_ > 15) {
+        beta_reduction_stage_ = std::max(beta_reduction_stage_, 3);
+    } else if (continuous_reject_cnt_ > 10) {
+        beta_reduction_stage_ = std::max(beta_reduction_stage_, 2);
+    } else if (continuous_reject_cnt_ > 5) {
+        beta_reduction_stage_ = std::max(beta_reduction_stage_, 1);
+    }
 }
 
 bool Placer::TryAcceptSimulation(double delta_cost) {
@@ -144,11 +167,13 @@ void Placer::RotateNode() {
     std::int64_t new_cost = ComputeCost(blocks_);
     std::int64_t delta_cost = new_cost - curr_cost_;
 
+
     if (TryAcceptSimulation(delta_cost)) {
         curr_cost_ = new_cost;
         if (new_cost < best_cost_) {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
+            best_area_ = ComputeArea(best_blocks_);
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -175,6 +200,7 @@ void Placer::SwapNode() {
         if (new_cost < best_cost_) {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
+            best_area_ = ComputeArea(best_blocks_);
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -226,6 +252,7 @@ void Placer::SwapOrRotateGroupNode() {
         if (new_cost < best_cost_) {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
+            best_area_ = ComputeArea(best_blocks_);
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -259,6 +286,7 @@ void Placer::MoveLeafNode() {
         if (new_cost < best_cost_) {
             best_cost_ = new_cost;
             best_blocks_ = blocks_;
+            best_area_ = ComputeArea(best_blocks_);
         }
         if (delta_cost > 0) {
             uphill_cnt_++;
@@ -273,10 +301,15 @@ void Placer::MoveLeafNode() {
 }
 
 void Placer::UpdateStats() {
-    if (gen_cnt_ == reject_cnt_) {
-        continuous_reject_cnt_ += 1;
-    } else {
+    num_iterations_ += 1;
+    if (num_iterations_ == 1) {
         continuous_reject_cnt_ = 0;
+    } else {
+        if (gen_cnt_ == reject_cnt_) {
+            continuous_reject_cnt_ += 1;
+        } else {
+            continuous_reject_cnt_ = 0;
+        }
     }
     gen_cnt_ = 0;
     uphill_cnt_ = 0;
@@ -298,17 +331,14 @@ bool Placer::ShouldStopRound() const {
 
 bool Placer::ShouldStopRunning() const {
     return stop_ ||
-               continuous_reject_cnt_ >= 10 ||
+               continuous_reject_cnt_ >= 50 ||
                temperature_ < 1.0;
 }
 
 void Placer::RunSimulatedAnnealing() {
     temperature_ = best_cost_ / 10.0;
     num_simulations_ = 0;
-    continuous_reject_cnt_ = -1;
-    gen_cnt_ = 0;
-    uphill_cnt_ = 0;
-    reject_cnt_ = 0;
+    num_iterations_ = 0;
     Timer timer;
 
     stop_ = false;
@@ -316,7 +346,6 @@ void Placer::RunSimulatedAnnealing() {
 
     do {
         UpdateStats();
-        ComputeBaseArea(blocks_);
         do {
             curr_cost_ = best_cost_;
             int move_type = RandInt(0, 3);
@@ -330,11 +359,12 @@ void Placer::RunSimulatedAnnealing() {
             }
             if (num_simulations_ % 1000 == 0) {
                 std::cerr << "[Step: " << num_simulations_
-                              << "] Area = " << ComputeArea(best_blocks_)
-                              << " | HPWL = "
-                              << ComputeTotalWirelength(best_blocks_)
+                              << ", Time: "
+                              << timer.GetDurationSeconds()
+                              << " (sec)] Area = "
+                              << best_area_
                               << " | Cost = "
-                              << ComputeCost(best_blocks_)
+                              << best_cost_
                               << std::endl;
             }
             if (timer.GetDurationSeconds() >= maxtime_sec) {
@@ -346,11 +376,13 @@ void Placer::RunSimulatedAnnealing() {
         std::cerr << "uphill_cnt = " << uphill_cnt_ << std::endl;
         std::cerr << "reject_cnt = " << reject_cnt_ << std::endl;
         std::cerr << "continuous_reject_cnt = " << continuous_reject_cnt_ << std::endl;
+        std::cerr << "beta_reduction_stage = " << beta_reduction_stage_ << std::endl;
         std::cerr << "temperature = " << temperature_ << std::endl;
 
         if (ShouldReduceTemperature()) {
             temperature_ *= 0.95;
         }
+        UpdateCostFactorStage();
     } while (!ShouldStopRunning());
 }
 
