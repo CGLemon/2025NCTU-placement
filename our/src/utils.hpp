@@ -66,6 +66,14 @@ public:
         return s_ * 2685821657736338717ULL;
     }
 
+    constexpr std::uint64_t GetSeed() const {
+        return s_;
+    }
+    constexpr void SetSeed(std::uint64_t seed) {
+        s_ = seed;
+    }
+    
+
     // Special generator used to fast init magic numbers.
     // Output values only have 1/8th of their bits set on average.
     constexpr std::uint64_t SparseRand() { return Rand64() & Rand64() & Rand64(); }
@@ -127,6 +135,12 @@ inline std::vector<int> RandSample(int l, int r, int size) {
         }
     } while ((int)seen.size() < size);  // 如果有重複，就重試
     return result;
+}
+inline std::uint64_t GetCurrentSeed() {
+    return PRNG::Get().GetSeed();
+}
+inline void SetCurrentSeed(std::uint64_t seed) {
+    PRNG::Get().SetSeed(seed);
 }
 
 inline NodePointer BuildBalancedTree(NodePointerList& nodes) {
@@ -281,6 +295,9 @@ public:
    LeafMoveOp() = default;
 
     void Apply(NodePointer root) {
+        if (!root) {
+            return;
+        }
         std::function<void(NodePointer, NodePointerList&)> GatherAllLeafNodes =
             [&] (NodePointer node, NodePointerList &buf) {
             if (node) {

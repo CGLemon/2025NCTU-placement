@@ -11,4 +11,4 @@ release:
 	$(CXX) $(SRCS) -o $(TARGET) $(CXXFLAGS)
 
 clean:
-	@rm $(TARGET)
+	@rm -f $(TARGET)

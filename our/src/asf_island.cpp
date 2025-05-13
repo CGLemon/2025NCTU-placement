@@ -121,13 +121,15 @@ NodePointer AsfIsland::TryConnectTrees() {
  *             2) 鏡射 mate / self 模組  (式 (1)(2))
  *             3) 校正 bbox 置於 (0,0)
  ********************************************************************/
-void AsfIsland::Pack(std::vector<Block>& blocks) {   
+std::int64_t AsfIsland::PackAndGetPenaltyArea(std::vector<Block>& blocks) {   
     /* ---------- 0) 打包代表半平面 ---------- */
     UpdateNodes(blocks);
 
     NodePointer connect_node = TryConnectTrees();
     bs_tree_.root = GetTreesRoot();
     bs_tree_.setPosition();
+    std::int64_t full_area = bs_tree_.getArea() * 2;
+    std::int64_t block_area = 0;
 
     /* ---------- 1) 掃描代表並鏡射 ---------- */
     std::int64_t min_x = LLONG_MAX, min_y = LLONG_MAX;
@@ -161,7 +163,10 @@ void AsfIsland::Pack(std::vector<Block>& blocks) {
                 mate.x = rep.x;
                 mate.y = 2 * axis_pos_ - rep.y - rep.GetRotatedHeight(); // 式 (2)
             }
-            
+
+            // 共兩個相同大小的方塊
+            block_area += rep.GetRotatedWidth() * rep.GetRotatedHeight() * 2;
+
             // 也要把 mate 也納入 bounding‐box 更新
             min_x = std::min<std::int64_t>(min_x, mate.x);
             min_y = std::min<std::int64_t>(min_y, mate.y);
@@ -178,6 +183,7 @@ void AsfIsland::Pack(std::vector<Block>& blocks) {
             } else {
                 rep.y = axis_pos_ - rep.GetRotatedHeight()/2; // 中心落在 y
             }
+            block_area += rep.GetRotatedWidth() * rep.GetRotatedHeight();
         }
 
         /* 1-d  更新 bounding box */
@@ -220,6 +226,7 @@ void AsfIsland::Pack(std::vector<Block>& blocks) {
            connect_node->lchild = nullptr;
         }
     }
+    return full_area - block_area;
 }
 
 void AsfIsland::Mirror(std::vector<Block>& blocks) {

@@ -13,7 +13,8 @@ public:
     AsfIsland(SymmGroup * g): group_(g) {}
 
     void Initialize(std::vector<Block> &blocks);
-    void Pack(std::vector<Block>& blocks);
+    std::int64_t PackAndGetPenaltyArea(std::vector<Block>& blocks);
+    void GetPenalty(std::vector<Block>& blocks);
     void BuildInitialSolution();
     void UpdateNodes(const std::vector<Block>& blocks);
 

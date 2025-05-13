@@ -1,5 +1,5 @@
-#include <algorithm> 
-#include <functional>
+#include <algorithm>
+#include <cmath>
 #include "hb_tree.hpp"
 
 void HbTree::Initialize(std::vector<Block> &blocks,
@@ -59,11 +59,13 @@ void HbTree::BuildInitialSolution() {
     bs_tree_.root = BuildLeftSkewedTree(sorted);
 }
 
-std::int64_t HbTree::PackAndGetArea(std::vector<Block> &blocks) {
+std::int64_t HbTree::PackAndGetArea(std::vector<Block> &blocks, double penalty_factor) {
     // 重新 pack 每個 island 內部 （如果 island 內部也要重新 SA 擾動）
-    for (auto &isl: islands_) {
-        isl->Pack(blocks);
+    std::int64_t penalty_area = 0;
+    for (auto &island: islands_) {
+        penalty_area += island->PackAndGetPenaltyArea(blocks);
     }
+    penalty_area = std::round<std::int64_t>(penalty_factor * penalty_area);
 
     // 1. 用 B*-Tree 計算全局 (x,y)
     UpdateNodes(blocks);
@@ -94,7 +96,7 @@ std::int64_t HbTree::PackAndGetArea(std::vector<Block> &blocks) {
     }
 
     // 4. 回傳整個排版面積
-    return bs_tree_.getArea();
+    return bs_tree_.getArea() + penalty_area;
 }
 
 int HbTree::GetNumberNodes() const {

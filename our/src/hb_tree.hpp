@@ -18,7 +18,8 @@ public:
 
     void BuildInitialSolution();
 
-    std::int64_t PackAndGetArea(std::vector<Block> &blocks);
+    std::int64_t PackAndGetArea(std::vector<Block> &blocks,
+                                double penalty_factor=0.);
 
     int GetNumberNodes() const;
     AsfIsland * GetIsland(int idx);
