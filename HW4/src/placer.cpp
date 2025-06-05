@@ -57,7 +57,6 @@ void Placer::ReadFile(const std::string& path) {
                 group.pairs.emplace_back(symm_pair);
                 if (blocks_[symm_pair.aid].GetRotatedWidth() !=
                         blocks_[symm_pair.bid].GetRotatedWidth()) {
-                    std::cerr << symm_pair.b << "\n";
                     blocks_[symm_pair.aid].PreRotate();
                 }
             } else if (tok == "SymSelf") {
