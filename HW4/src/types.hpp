@@ -15,12 +15,15 @@ struct Block {
     int x{0}, y{0};
     int gid{-1};
     bool rotated{false};
+    bool pre_rotated{false};
 
     inline int GetRotatedWidth() const { return rotated ? h : w; }
     inline int GetRotatedHeight() const { return rotated ? w : h; }
+    inline void PreRotate() { std::swap(h, w); pre_rotated = !pre_rotated; }
     inline void Rotate() { rotated = !rotated; }
     inline bool IsSolo() const { return gid == -1; }
 };
+
 
 enum class Axis {
     kVertical,

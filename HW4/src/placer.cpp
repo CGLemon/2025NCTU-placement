@@ -55,6 +55,11 @@ void Placer::ReadFile(const std::string& path) {
                 blocks_[symm_pair.aid].gid = i;
                 blocks_[symm_pair.bid].gid = i;
                 group.pairs.emplace_back(symm_pair);
+                if (blocks_[symm_pair.aid].GetRotatedWidth() !=
+                        blocks_[symm_pair.bid].GetRotatedWidth()) {
+                    std::cerr << symm_pair.b << "\n";
+                    blocks_[symm_pair.aid].PreRotate();
+                }
             } else if (tok == "SymSelf") {
                 SymmSelf symm_self;
                 fin >> symm_self.a;
@@ -86,8 +91,9 @@ void Placer::WriteFile(const std::string& path) {
 
     fout << "Area " << best_area_ << "\n\n";
     fout << "NumHardBlocks " << best_blocks_.size() << "\n";
-    for (auto& b: best_blocks_ ) {
-        fout << b.name << " " << b.x << " " << b.y << " " << (b.rotated ? 1 : 0) << "\n";
+    for (auto& b: best_blocks_) {
+        bool rotated = b.rotated ^ b.pre_rotated;
+        fout << b.name << " " << b.x << " " << b.y << " " << (rotated ? 1 : 0) << "\n";
     }
     std::cerr << "[INFO] final area = " << best_area_ << "\n";
 }

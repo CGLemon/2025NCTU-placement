@@ -105,9 +105,10 @@ struct Node
 
     T x, y;
     T width, height;
-    Node *lchild, *rchild;
+    Node *parent, *lchild, *rchild;
+    int blockId;
 
-    Node() : x(0), y(0), width(0), height(0), lchild(nullptr), rchild(nullptr) {}
+    Node() : x(0), y(0), width(0), height(0), parent(nullptr), lchild(nullptr), rchild(nullptr) {}
 
     void setPosition(T x_, T y_)
     {
@@ -131,7 +132,7 @@ class BStarTree
     std::unordered_map<Node<T> *, int64_t> toInorderIdx;
     SegmentTree<T> contourH;
 
-    Node<T> *buildTree(const std::vector<Node<T> *> &preorder, const std::vector<Node<T> *> &inorder, size_t &i, int64_t l, int64_t r)
+    Node<T> *buildTree(Node<T> *parent, const std::vector<Node<T> *> &preorder, const std::vector<Node<T> *> &inorder, size_t &i, int64_t l, int64_t r)
     {
         if (l > r || i >= preorder.size())
             return nullptr;
@@ -139,8 +140,9 @@ class BStarTree
         Node<T> *node = preorder[i++];
         assert(toInorderIdx.count(node) > 0 && "Node not found in inorder map.");
         int64_t idx = toInorderIdx[node];
-        node->lchild = buildTree(preorder, inorder, i, l, idx - 1);
-        node->rchild = buildTree(preorder, inorder, i, idx + 1, r);
+        node->parent = parent;
+        node->lchild = buildTree(node, preorder, inorder, i, l, idx - 1);
+        node->rchild = buildTree(node, preorder, inorder, i, idx + 1, r);
         return node;
     }
 
@@ -192,7 +194,8 @@ public:
             toInorderIdx[inorder[i]] = i;
 
         size_t i = 0;
-        root = buildTree(preorder, inorder, i, 0LL, n - 1);
+        root = buildTree(nullptr, preorder, inorder, i, 0LL, n - 1);
+        toInorderIdx.clear();
     }
 
     void setPosition()
